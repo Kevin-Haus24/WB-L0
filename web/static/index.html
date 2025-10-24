@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Order Viewer</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    input { width: 60%; padding: 8px; }
+    button { padding: 8px 12px; }
+    pre { background: #f4f4f4; padding: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Order Viewer</h1>
+  <input id="orderId" placeholder="Введите order_uid">
+  <button onclick="load()">Показать</button>
+  <div id="result"></div>
+
+  <script>
+    async function load() {
+      const id = document.getElementById('orderId').value.trim();
+      const res = await fetch('/orders/' + id);
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('result').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+      } else {
+        document.getElementById('result').innerHTML = 'Заказ не найден';
+      }
+    }
+  </script>
+</body>
+</html>

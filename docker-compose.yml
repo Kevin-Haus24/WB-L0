@@ -1,0 +1,26 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: demo_user
+      POSTGRES_PASSWORD: demo_pass
+      POSTGRES_DB: demo_orders
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  nats-streaming:
+    image: nats-streaming:0.25.6
+    command: ["--store", "file", "--dir", "/data/stan"]
+    ports:
+      - "4222:4222"    # core NATS
+      - "8222:8222"    # monitoring
+      - "4223:4223"    # legacy cluster? (optional)
+    volumes:
+      - stan_data:/data/stan
+
+volumes:
+  pgdata:
+  stan_data:
