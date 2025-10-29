@@ -1,19 +1,37 @@
-# Demo order service
+# Обзор проекта
 
-## requirements
+## Компоненты
 
-- Go 1.22+
-- Docker Compose (for PostgreSQL and NATS Streaming)
+- **PostgreSQL** — хранит исходные JSON-документы заказов и основные поля для быстрого поиска.
+- **NATS Streaming** — очередь, из которой сервис принимает новые заказы.
+- **Сервис** (`cmd/service`) — подписывается на поток заказов, сохраняет их в БД и выдаёт через HTTP API и веб-интерфейс.
+- **Кэш** (`internal/cache`) — хранит JSON заказов в памяти для быстрой выдачи.
+- **Паблишер** (`cmd/publisher`) — утилита для отправки тестовых заказов в канал NATS.
+- **Веб-интерфейс** (`web/static`) — простая страница для запроса заказа по `order_uid`.
 
-## quick start
+## Последовательность работы сервиса
 
-1. `docker compose up -d`
-2. `go run ./cmd/service`
+1. **Старт инфраструктуры**: через `docker compose up -d` поднимаются контейнеры PostgreSQL и NATS Streaming.
+2. **Запуск приложения**: команда `go run ./cmd/service` запускает сервис.
+3. **Подключение к PostgreSQL**: сервис создаёт пул соединений (`internal/db.New`) и гарантирует наличие таблицы (`EnsureSchema`).
+4. **Прогрев кэша**: метод `GetAllOrders` читает все заказы из таблицы `orders`, далее `cache.LoadAll` переносит их в память.
+5. **Подписка на NATS**: модуль `internal/nats.Subscribe` устанавливает соединение с сервером и создаёт durable-подписку на канал `orders`.
+6. **Обработка сообщений**: каждое сообщение
+   - парсится в модель `model.Order` (`decodeOrder`),
+   - сохраняется в БД (`SaveOrder`),
+   - кладётся в кэш (`cache.Set`).
+7. **HTTP API**:
+   - `GET /orders/{order_uid}` — сначала проверяет кэш, при промахе поднимает данные из БД, догружает их в кэш и возвращает клиенту.
+8. **Веб-страница**: `index.html` делает AJAX-запрос на `/orders/{order_uid}` и отображает отформатированный JSON.
+9. **Завершение работы**: сервис ловит SIGINT/SIGTERM, закрывает HTTP-сервер, отписывается от NATS и закрывает соединения с БД.
 
-Use the helper publisher to push the sample order:
+## Работа с тестовыми данными
 
-```
-go run ./cmd/publisher -f model.json
-```
+1. Запустите сервис.
+2. Отправьте пример заказа: `go run ./cmd/publisher -f model.json`.
+3. Откройте `http://localhost:8080/` и введите `order_uid` из файла `model.json` для проверки.
 
-Then open http://localhost:8080/ and enter the order UID.
+## Хранение данных
+
+- Таблица `orders` содержит ключевые поля заказа и колонку `raw` (JSONB) с полным исходным документом.
+- В кэше данные лежат в виде `map[string]json.RawMessage`, что позволяет быстро отдавать исходный JSON без повторной сериализации.

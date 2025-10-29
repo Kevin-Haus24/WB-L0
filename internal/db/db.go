@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"L0/internal/model"
+	"L0/migrations"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,21 +30,7 @@ func (db *DB) Close() {
 }
 
 func (db *DB) EnsureSchema(ctx context.Context) error {
-	_, err := db.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS orders (
-		order_uid TEXT PRIMARY KEY,
-		track_number TEXT,
-		entry TEXT,
-		locale TEXT,
-		internal_signature TEXT,
-		customer_id TEXT,
-		delivery_service TEXT,
-		shardkey TEXT,
-		sm_id INT,
-		date_created TIMESTAMPTZ,
-		oof_shard TEXT,
-		raw JSONB NOT NULL,
-		created_at TIMESTAMPTZ DEFAULT now()
-	)`)
+	_, err := db.pool.Exec(ctx, migrations.CreateTables)
 	return err
 }
 
