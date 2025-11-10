@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,8 +12,8 @@ import (
 
 	"L0/internal/cache"
 	"L0/internal/db"
-	"L0/internal/model"
 	"L0/internal/nats"
+	"L0/internal/service"
 
 	stan "github.com/nats-io/stan.go"
 )
@@ -45,28 +43,21 @@ func main() {
 
 	// Восстановление кэша из БД — прогрев оперативного хранилища.
 	c := cache.New()
-	if data, err := database.GetAllOrders(ctx); err != nil {
-		log.Printf("warm cache: %v", err) // Логирует предупреждение о невозможности прогрева.
+	orders := service.NewOrderService(database, c)
+	if warmed, err := orders.WarmCache(ctx); err != nil {
+		log.Printf("warm cache: %v", err)
 	} else {
-		c.LoadAll(data) // Массово загружает заказы в кэш для ускорения дальнейших запросов.
-		log.Printf("cache warmed: %d orders", len(data))
+		log.Printf("cache warmed: %d orders", warmed)
 	}
 
 	// Подписка на NATS — настройка обработки входящих сообщений.
 	sc, sub, err := nats.Subscribe(natsClusterID, natsClientID, natsChannel, func(msg *stan.Msg) {
-		order, normalized, err := decodeOrder(msg.Data) // Пытается декодировать сообщение в структуру заказа и нормализованную JSON.
+		orderID, err := orders.ProcessIncoming(ctx, msg.Data)
 		if err != nil {
 			log.Println("skip message:", err)
 			return
 		}
-
-		if err := database.SaveOrder(ctx, order, normalized); err != nil {
-			log.Println("db save:", err)
-			return
-		}
-
-		c.Set(order.OrderUID, normalized) // Кладёт нормализованный JSON в кэш по ключу заказа.
-		log.Println("saved order:", order.OrderUID)
+		log.Println("saved order:", orderID)
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -86,28 +77,20 @@ func main() {
 			http.Error(w, "missing order id", http.StatusBadRequest)
 			return
 		}
-		if data, ok := c.Get(id); ok { // Пытается получить заказ из кэша.
-			w.Header().Set("Content-Type", "application/json") // Устанавливает тип содержимого ответа.
-			w.WriteHeader(http.StatusOK)
-			w.Write(data) // Возвращает кэшированный JSON заказ.
-			return
-		}
-
-		raw, err := database.GetOrder(r.Context(), id) // Загружает заказ из БД при промахе кэша.
+		data, err := orders.GetByID(r.Context(), id)
 		if err != nil {
 			log.Printf("get order %s: %v", id, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if raw == nil { // Проверяет, найден ли заказ.
-			http.NotFound(w, r) // Отправляет клиенту статус 404, если заказ отсутствует.
-			return              // Завершает обработку запроса.
+		if data == nil {
+			http.NotFound(w, r)
+			return
 		}
 
-		c.Set(id, raw)                                     // Кладёт загруженный из БД заказ в кэш для последующих запросов.
 		w.Header().Set("Content-Type", "application/json") // Настраивает заголовок ответа.
 		w.WriteHeader(http.StatusOK)
-		w.Write(raw) // Возвращает клиенту найденный JSON.
+		w.Write(data)
 	})
 
 	// Отдаём статический фронт
@@ -137,22 +120,4 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
 	}
-}
-
-// decodeOrder проверяет входящий JSON и возвращает нормализованную структуру заказа
-func decodeOrder(raw []byte) (model.Order, json.RawMessage, error) {
-	var order model.Order
-	if err := json.Unmarshal(raw, &order); err != nil { // пытаемся распарсить входящий JSON
-		return model.Order{}, nil, fmt.Errorf("invalid json: %w", err)
-	}
-	if order.OrderUID == "" { // проверяем обязательное поле идентификатора заказа
-		return model.Order{}, nil, fmt.Errorf("missing order_uid")
-	}
-
-	normalized, err := json.Marshal(order) // сериализуем полученную структуру обратно в JSON, чтобы выровнять формат
-	if err != nil {
-		return model.Order{}, nil, fmt.Errorf("normalize: %w", err)
-	}
-
-	return order, normalized, nil
 }
