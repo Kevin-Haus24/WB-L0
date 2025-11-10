@@ -28,7 +28,7 @@
 ## Работа с тестовыми данными
 
 1. Запустите сервис.
-2. Отправьте пример заказа: `go run ./cmd/publisher -f model.json`.
+2. Отправьте пример заказа: `go run ./cmd/publisher -f internal\service\testdata\model.json`.
 3. Откройте `http://localhost:8080/` и введите `order_uid` из файла `model.json` для проверки.
 
 ## Хранение данных
